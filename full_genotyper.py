@@ -4,9 +4,6 @@ import pathlib
 from itertools import chain
 import random
 
-#### Duplicate reverse maps before forward read
-#### Deletion forward and reverse map w/in read-length of breakpoints
-#### Split reads are fucky because if a read starts to the right of a breakpoint for a duplicate but most of it maps to the left, the supplemental and primary reads will be switched, which is really cool!!!
 def calc_query_pos_from_cigar(cigar, strand):
     """
     copied from samplot source code (https://github.com/ryanlayer/samplot)
@@ -150,7 +147,6 @@ def main():
     outside_threshold = 450 #### threshold for reads outside the signal breakpoints for that SV type
     sam_iter_buffer = 600
     for var in vcf_in.fetch():
-        #print(var.samples[sample]['GT'])
         start_pos = var.start
         end_pos = var.stop
         chrom = var.chrom
@@ -232,12 +228,6 @@ def main():
                             if left_bp in range(start_pos-outside_threshold,start_pos+inside_threshold) and right_bp in range(end_pos-inside_threshold,end_pos+outside_threshold):
                                 split_support_counter += 1
 
-
-                    #####                          #####
-                    # End check split reads for signal #
-                    #####                          #####
-
-
                     #####                       #####
                     # Check paired reads for signal #
                     #####                       #####
@@ -278,6 +268,7 @@ def main():
                         paired_read_end = read.reference_end
                         paired_mate_end = read.next_reference_start + (paired_mate_q_end - paired_mate_q_start)
                         
+                        ##### Check duplication signal if SV = DUP
                         if var.info["SVTYPE"] == "DUP" and read.reference_id == read.next_reference_id:
                             if read.is_reverse and paired_read_end in range(start_pos-outside_threshold,start_pos+inside_threshold) and not read.mate_is_reverse:
                                 if read.next_reference_start > read.reference_start and read.next_reference_start in range(end_pos-inside_threshold,end_pos+outside_threshold):
