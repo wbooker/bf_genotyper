@@ -2,12 +2,48 @@ import pysam
 import os
 import pathlib
 from itertools import chain
-from samplot import calc_query_pos_from_cigar
 import random
 
 #### Duplicate reverse maps before forward read
 #### Deletion forward and reverse map w/in read-length of breakpoints
 #### Split reads are fucky because if a read starts to the right of a breakpoint for a duplicate but most of it maps to the left, the supplemental and primary reads will be switched, which is really cool!!!
+def calc_query_pos_from_cigar(cigar, strand):
+    """
+    copied from samplot source code (https://github.com/ryanlayer/samplot)
+    Uses the CIGAR string to determine the query position of a read
+
+    The cigar arg is a string like the following: 86M65S
+    The strand arg is a boolean, True for forward strand and False for
+    reverse
+
+    Returns pair of ints for query start, end positions
+    """
+
+    cigar_ops = [[int(op[0]), op[1]] for op in re.findall("(\d+)([A-Za-z])", cigar)]
+
+    order_ops = cigar_ops
+    if not strand:  # - strand
+        order_ops = order_ops[::-1]
+
+    qs_pos = 0
+    qe_pos = 0
+    q_len = 0
+
+    for op_position in range(len(cigar_ops)):
+        op_len = cigar_ops[op_position][0]
+        op_type = cigar_ops[op_position][1]
+
+        if op_position == 0 and (op_type == "H" or op_type == "S"):
+            qs_pos += op_len
+            qe_pos += op_len
+            q_len += op_len
+        elif op_type == "H" or op_type == "S":
+            q_len += op_len
+        elif op_type == "M" or op_type == "I" or op_type == "X":
+            qe_pos += op_len
+            q_len += op_len
+
+    return qs_pos, qe_pos
 
 def get_pair_event_type(primary, mate):
     """
