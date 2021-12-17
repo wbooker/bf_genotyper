@@ -45,24 +45,6 @@ def calc_query_pos_from_cigar(cigar, strand):
 
     return qs_pos, qe_pos
 
-def get_pair_event_type(primary, mate):
-    """
-    modified from the samplot source code (https://github.com/ryanlayer/samplot)
-
-    Decide what type of event the read supports (del/normal, dup, inv)
-
-    primary = not read.is_reverse
-    mate = not read.mate_is_reverse
-
-    """
-    event_by_strand = {
-        (True, False): "Deletion/Normal",
-        (False, True): "Duplication",
-        (False, False): "Inversion",
-        (True, True): "Inversion",
-    }
-    event_type = event_by_strand[primary, mate]
-    return event_type
 
 def get_split_event_type(primary, supplemental):
     """
@@ -87,11 +69,9 @@ def get_split_event_type(primary, supplemental):
     else:
         first = supplemental
         second = primary
-    ### in samplot this checks first_pre_start against second_pre_end, but I don't see how this tells us anything.
-    ### switched to check if the rightmost(second) starting read is completely within the leftmost (first) starting read
+    ### in samplot this checks first_pre_start against second_pre_end, but I don't see how this tells us anything and led
+    ### to bad calls. modified checks to look at 1st read end overlapping 2nd read start
 
-    # first.strand, second.strand,
-    # first.query<second.query,first.start<second.start
     event_type_by_strand_and_order = {
         (True, False): "INV",  # mixed strands
         (False, True): "INV",  # mixed strands
@@ -125,73 +105,6 @@ def get_split_event_type(primary, supplemental):
 
     return event_type
 
-def get_split_event_type_old_12_16_2021(primary, supplemental):
-    """
-        modified from the samplot source code (https://github.com/ryanlayer/samplot)
-
-        Decide what type of event the read supports (del/normal, dup, inv)
-        
-        primary = [primary_reference, primary_strand, primary_q_start, primary_start_pos, primary_end_pos, bam_file.get_tid(primary_reference)]
-        supplemental = [supp_reference, supp_strand, supp_q_start, supp_start_pos, supp_end_pos, bam_file.get_tid(supp_reference)]
-
-        Here we first check positions and whether the read that starts second is completely overlapped by the left-most starting read,
-        then we check the strand of each read. Then, we check that the query postion start, which tells us which read has trailing soft/hard 
-        clipped bases and is therefore the read mapped after the initial read hit the breakpoint for forward reads, opposite for reverse.
-        Then we check if reverse and completely overlapped, if the query and start position matches duplication or deletion.
-    """
-    ### in the original samplot, a table with the primary and supplemental reads are ordered by start position before
-    ### being input into this function, so we do this at the start to accurately check if one read is completely overlapped
-    ### by another read. 
-    if primary[3] < supplemental[3]:
-        first_pre = primary
-        second_pre = supplemental
-    else:
-        first_pre = supplemental
-        second_pre = primary
-    ### in samplot this checks first_pre_start against second_pre_end, but I don't see how this tells us anything.
-    ### switched to check if the rightmost(second) starting read is completely within the leftmost (first) starting read
-    if first_pre[4] > second_pre[4] or first_pre[5] > second_pre[5]:
-        second = first_pre
-        first = second_pre
-    else:
-        first = first_pre
-        second = second_pre
-
-    # first.strand, second.strand,
-    # first.query<second.query,first.start<second.start
-    event_type_by_strand_and_order = {
-        (True, False): "Inversion",  # mixed strands
-        (False, True): "Inversion",  # mixed strands
-        (True, True, True): "Deletion/Normal",  # forward strand
-        (True, True, False): "Duplication",  # forward strand
-        (False, False, False, False): "Deletion/Normal",  # reverse strand
-        (False, False, False, True): "Duplication",  # reverse strand
-        (False, False, True, True): "Deletion/Normal",  # reverse strand
-        (False, False, True, False): "Duplication",  # reverse strand
-    }
-    ## append first and second strand to orientations
-    orientations = [first[1], second[1]]
-
-    # if same strand, need query position info
-    if orientations[0] == orientations[1]:
-
-        # first query position smaller than second query position,
-        # normal for forward strand
-        orientations.append(first[2] < second[2])
-
-        # reverse strand requires start position info
-        if False in orientations[:2]:
-            # first start smaller than second start, normal for forward strand
-            orientations.append(first[3] < second[3])
-    event_type = event_type_by_strand_and_order[tuple(orientations)]
-
-    if first[0] != second[0]:
-        if event_type == "Inversion":
-            event_type = "InterChrmInversion"
-        else:
-            event_type = "InterChrm"
-
-    return event_type
 
 def get_breakpoints(primary, supplemental, split_type):
     """
@@ -219,11 +132,15 @@ def get_breakpoints(primary, supplemental, split_type):
     return left_bp, right_bp 
 
 
-def robust_get_MC(read):  
- try:  
-   return read.get_tag("MC")
- except KeyError:
-   return str(random.randint(1,150))+"M"
+def robust_get_MC(read):
+    """
+    sometimes MC cigar string missing for low mapping quality reads (mapq = 0). not really important as these are ignored, but 
+    need to return something for functionality
+    """  
+    try:  
+        return read.get_tag("MC")
+    except KeyError:
+        return str(random.randint(1,150))+"M"
 
 
 def main():
@@ -267,17 +184,9 @@ def main():
                     sam_iter_start = bam_file.fetch(chrom, max(0, start_pos-sam_iter_buffer), start_pos+sam_iter_buffer)
                     sam_iter_end = bam_file.fetch(chrom, end_pos-sam_iter_buffer, min(chrom_len, end_pos+sam_iter_buffer))
                     sam_iter = chain(sam_iter_start, sam_iter_end)
-                #if var.info["SVTYPE"] == "DUP" and var.info["SVLEN"] < 100000
+
                 for read in sam_iter:
-                    ###### Continue if read fails checks
-                    #if (
-                    #    read.is_secondary
-                    #    or read.is_qcfail
-                    #    or read.is_unmapped
-                    #    or read.is_duplicate
-                    #    or read.is_supplementary
-                    #):
-                    #    continue
+                    
                     #####                      #####
                     # Check split reads for signal #
                     #####                      #####
@@ -290,9 +199,7 @@ def main():
                         and not  read.is_duplicate
                         and not  read.is_supplementary
                         and read.mapping_quality > 0
-                    ): #and not read.is_supplementary:
-                        #if read.mapping_quality < 1:
-                        #    continue
+                    ):
 
                         split_type = ""
                         ##### Gather info on the primary, non-supplemental part of the read
@@ -318,17 +225,7 @@ def main():
                         
                         split_type = get_split_event_type(primary_read, supp_read)
                         
-                        ##### Check if split breakpoints within certain threshold of variant breakpoints
-
-                        #if primary_end_pos in range(start_pos-outside_threshold,start_pos+inside_threshold) and supp_start_pos in range(end_pos-inside_threshold,end_pos+outside_threshold):
-                        #    split_type = get_split_event_type(primary_read, supp_read)
-                        #    if sample == "FEMALE_2-F2_CTTAGGAC-GTAGGAGT_S12":
-                        #        print(split_type, read.query_name, primary_end_pos, supp_start_pos, supp_q_start, supp_q_end, supp_end_pos)
-
-                        #elif supp_end_pos in range(start_pos-outside_threshold,start_pos+inside_threshold) and primary_start_pos in range(end_pos-inside_threshold,end_pos+outside_threshold):
-                        #    split_type = get_split_event_type(primary_read, supp_read)
-                        #    if sample == "FEMALE_2-F2_CTTAGGAC-GTAGGAGT_S12":
-                        #        print(split_type, read.query_name, primary_end_pos, supp_start_pos, supp_q_start, supp_q_end, supp_end_pos)
+                        ##### Check if split is same as SV type and breakpoints within certain threshold of variant breakpoints
 
                         if var.info["SVTYPE"] == split_type:
                             left_bp, right_bp = get_breakpoints(primary_read, supp_read, split_type)
@@ -384,7 +281,6 @@ def main():
                         if var.info["SVTYPE"] == "DUP" and read.reference_id == read.next_reference_id:
                             if read.is_reverse and paired_read_end in range(start_pos-outside_threshold,start_pos+inside_threshold) and not read.mate_is_reverse:
                                 if read.next_reference_start > read.reference_start and read.next_reference_start in range(end_pos-inside_threshold,end_pos+outside_threshold):
-                                #print(read.reference_start, read.next_reference_start)
                                     if read.mapping_quality > 0:
                                         paired_support_name_list.append(read.query_name)
                                     else:
@@ -392,24 +288,21 @@ def main():
 
                             if not read.is_reverse and read.reference_start in range(end_pos-inside_threshold,end_pos+outside_threshold) and read.mate_is_reverse:
                                 if read.next_reference_start < read.reference_start and paired_mate_end in range(start_pos-outside_threshold,start_pos+inside_threshold):
-                                #print(read.reference_start, read.next_reference_start)
                                     if read.mapping_quality > 0:
                                         paired_support_name_list.append(read.query_name)
                                     else:
                                         paired_lowMQ_name_list.append(read.query_name)
 
                 paired_support_counter = len(paired_support_name_list)
-                #print(sample, start_pos, paired_support_counter, split_support_counter)
 
                 ##### Update genotypes #####
                 if paired_support_counter > 0 or split_support_counter > 0:
                     var.samples[sample]['GT'] = (1,1)
                 else:
-                    var.samples[sample]['GT'] = (0,0)        
+                    var.samples[sample]['GT'] = (0,0)   
+
+        #### Write variant genotypes to output SV ####                 
         vcf_out.write(var)
-            #with open('outfile.txt', 'a') as outfile:
-                #outfile.write(str(start_pos+1)+"\t"+str(end_pos)+"\t"+str(split_support_counter)+"\t"+str(paired_support_counter)+"\n")
-            #print(start_pos, split_support_counter,paired_support_counter)
     vcf_out.close()
 
 if __name__ == "__main__":
