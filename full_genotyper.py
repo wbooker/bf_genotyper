@@ -58,8 +58,7 @@ def get_split_event_type(primary, supplemental):
         Then we check if first end extends past second read start, and if that with the query position matches duplication or deletion.
     """
     ### in the original samplot, a table with the primary and supplemental reads are ordered by start position before
-    ### being input into this function, so we do this at the start to accurately check if one read is completely overlapped
-    ### by another read. 
+    ### being input into this function, so we do this at the start to accurately check if first read overlaps second
     if primary[3] < supplemental[3]:
         first = primary
         second = supplemental
