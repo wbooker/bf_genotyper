@@ -207,8 +207,8 @@ def main():
 
         #### breakpoint threshold dynamic on SV size
         if (end_pos - start_pos) < 300:
-            inside_threshold = 300 #150
-            outside_threshold = 300 #150
+            inside_threshold = 150
+            outside_threshold = 150
         elif 300 <= (end_pos - start_pos) < 1000:
             inside_threshold = 300
             outside_threshold = 300
@@ -347,8 +347,8 @@ def main():
                                     #print(calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]))
                                     if read.mapping_quality > 0:
                                         paired_support_name_list.append(read.query_name)
-                                        if sample == "JB_A2_25_S3":
-                                            print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
+                                        #if sample == "JB_A2_25_S3":
+                                            #print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
                                     else:
                                         paired_lowMQ_name_list.append(read.query_name)
 
@@ -358,8 +358,8 @@ def main():
                                     if read.mapping_quality > 0:
                                         paired_support_name_list.append(read.query_name)
 
-                                        if sample == "JB_A2_25_S3":
-                                            print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
+                                        #if sample == "JB_A2_25_S3":
+                                            #print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
                                     else:
                                         paired_lowMQ_name_list.append(read.query_name)
 
