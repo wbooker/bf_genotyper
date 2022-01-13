@@ -3,6 +3,7 @@ import os
 import pathlib
 from itertools import chain
 import random
+import re
 
 def calc_query_pos_from_cigar(cigar, strand):
     """
@@ -125,6 +126,14 @@ def get_breakpoints(primary, supplemental, split_type):
         else:
             left_bp = first[3]
             right_bp = second[4]
+    
+    if split_type == "DEL":
+        left_bp = first[4]
+        right_bp = second[3]
+    
+    if left_bp > right_bp:
+        raise Exception('left_bp > right_bp')
+
     return left_bp, right_bp 
 
 
@@ -138,13 +147,59 @@ def robust_get_MC(read):
     except KeyError:
         return str(random.randint(1,150))+"M"
 
+def calc_rough_insert_size(read_positions):
+    """
+    rough calculation of insert size for examining otherwise normal reads. takes in the start and end positions of each paired read
+    and returns the total size of max - min of those positions
+    """
+    return max(read_positions) - min(read_positions)
+
+
 
 def main():
-    vcf_in = pysam.VariantFile("all_rd150_DupOnly.vcf",'r')
-    vcf_out = pysam.VariantFile("all_dup_genotyped_12_16.vcf",'w', header=vcf_in.header)
+    vcf_in = pysam.VariantFile("inputs/test_del.vcf",'r')
+    vcf_out = pysam.VariantFile("outputs/test_del_gt.vcf",'w', header=vcf_in.header)
     inside_threshold = 450 #### threshold for reads inside the signal breakpoints for that SV type
     outside_threshold = 450 #### threshold for reads outside the signal breakpoints for that SV type
     sam_iter_buffer = 600
+    mean_sd_dic = {'FEMALE_1-F1_CGCATGAT-TCAGGCTT_S1': [345,179],
+                   'FEMALE_2-F2_CTTAGGAC-GTAGGAGT_S12': [422,201],
+                   'FEMALE_3-F3_ATCCGGTA-TATCGGTC_S16': [366,185],
+                   'FEMALE_4-F4_ACTGAGGT-CTGTTGAC_S17': [274,161],
+                   'FEMALE_5-F5_CATACCAC-CGGTTGTT_S18': [393,193],
+                   'FEMALE_6-F6_AACGTCTG-GCGTCATT_S19': [400,194],
+                   'FEMALE_7-F7_CCTGATTG-AACTGAGC_S20': [424,198],
+                   'FEMALE_8-F8_CCTTGTAG-TTCCAAGG_S21': [330,171],
+                   'FEMALE_9-F9_ACGGAACA-GTTCTCGT_S22': [262,130],
+                   'FEMALE_10-F10_GTGCCATA-ACTAGGAG_S2': [365,183],
+                   'FEMALE_11-F11_CGTTGCAA-CGCTCTAT_S3': [343,169],
+                   'FEMALE_12-F12_TGAAGACG-TGGCATGT_S4': [401,183],
+                   'FEMALE_13-F13_GAAGTTGG-GTTGTTCG_S5': [235,120],
+                   'FEMALE_14-F14_ACGTTCAG-GCACAACT_S6': [388,180],
+                   'FEMALE_15-F15_ATGCACGA-GACGATCT_S7': [378,179],
+                   'FEMALE_17-F17_CGGCTAAT-AGAACGAG_S9': [286,101],
+                   'FEMALE_18-F18_GAATCCGA-CACTAGCT_S10': [320,132],
+                   'FEMALE_19-F19_GTGAAGTG-GATTGCTC_S11': [272,109],
+                   'FEMALE_20-F20_GTTACGCA-ATCGCCAT_S13': [289,99],
+                   'FEMALE_21-F21_ATGACGTC-GAAGGAAG_S14': [303,110],
+                   'FEMALE_22-F22_CAGTCCAA-GATTACCG_S15': [255,113],
+                   'MALE_1-M1_CGACGTTA-ATCCAGAG_S23': [333,142],
+                   'MALE_2-M2_TAACCGGT-GAGACGAT_S24': [286,123],
+                   'MALE_3-M3_ATCGATCG-TGCTTCCA_S25': [290,152],
+                   'MALE_4-M4_TCGCTGTT-ACGACTTG_S26': [364,174],
+                   'MALE_5-M5_CATGGCTA-GATGTGTG_S27': [340,166],
+                   'MALE_6-M6_AGCGTGTT-TTGCGAAG_S28': [366,176],
+                   'JB_A2_18_S1': [135,41],
+                   'JB_A2_19_S2': [146,46],
+                   'JB_A2_25_S3': [152,48],
+                   'JB_A2_29_S4': [136,37],
+                   'JB_A2_34_S5': [141,38],
+                   'JB_A2_35_S6': [143,42],
+                   'JB_A2_36_S7': [133,36],
+                   'JB_A2_39_S8': [156,58],
+                   'JB_A2_46_S9': [165,65],
+                   'JB_A2_50_S10': [127,33],}
+
     for var in vcf_in.fetch():
         start_pos = var.start
         end_pos = var.stop
@@ -152,8 +207,8 @@ def main():
 
         #### breakpoint threshold dynamic on SV size
         if (end_pos - start_pos) < 300:
-            inside_threshold = 150
-            outside_threshold = 150
+            inside_threshold = 300 #150
+            outside_threshold = 300 #150
         elif 300 <= (end_pos - start_pos) < 1000:
             inside_threshold = 300
             outside_threshold = 300
@@ -161,7 +216,7 @@ def main():
             inside_threshold = 450
             outside_threshold = 450
 
-        with open("bams.txt", "r") as bam_list:
+        with open("inputs/bams.txt", "r") as bam_list:
             for f in bam_list:
                 paired_support_name_list = []
                 paired_lowMQ_name_list = []
@@ -171,6 +226,8 @@ def main():
                 sample = str(os.path.basename(bam_file.filename.decode('utf-8')))
                 sample = sample[:sample.index("_sorted_dedup")]
                 chrom_len = bam_file.get_reference_length(chrom)
+                sample_insert_mean = mean_sd_dic[sample][0]
+                sample_insert_sd = mean_sd_dic[sample][1]
 
                 ### Check to make sure we don't have duplicated reads if svlen < sam_iter_buffer*2, min/max to make sure we aren't starting past chromosome ends
                 if end_pos - start_pos <= 2*sam_iter_buffer:
@@ -280,6 +337,29 @@ def main():
                                 if read.next_reference_start < read.reference_start and paired_mate_end in range(start_pos-outside_threshold,start_pos+inside_threshold):
                                     if read.mapping_quality > 0:
                                         paired_support_name_list.append(read.query_name)
+                                    else:
+                                        paired_lowMQ_name_list.append(read.query_name)
+
+                        ##### if DEL, check if on same chrom and if insert_size is greater than 2 standard deviations above the average
+                        if var.info["SVTYPE"] == "DEL" and read.reference_id == read.next_reference_id and calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]) > (sample_insert_mean + (3 * sample_insert_sd)):
+                            if read.is_reverse and read.reference_start in range(end_pos-outside_threshold,end_pos+inside_threshold) and not read.mate_is_reverse:
+                                if read.next_reference_start < read.reference_start and paired_mate_end in range(start_pos-inside_threshold,start_pos+outside_threshold):
+                                    #print(calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]))
+                                    if read.mapping_quality > 0:
+                                        paired_support_name_list.append(read.query_name)
+                                        if sample == "JB_A2_25_S3":
+                                            print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
+                                    else:
+                                        paired_lowMQ_name_list.append(read.query_name)
+
+                            if not read.is_reverse and read.reference_end in range(start_pos-inside_threshold,start_pos+outside_threshold) and read.mate_is_reverse:
+                                if read.next_reference_start > read.reference_start and read.next_reference_start in range(end_pos-outside_threshold,end_pos+inside_threshold):
+                                    #print(calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]))
+                                    if read.mapping_quality > 0:
+                                        paired_support_name_list.append(read.query_name)
+
+                                        if sample == "JB_A2_25_S3":
+                                            print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
                                     else:
                                         paired_lowMQ_name_list.append(read.query_name)
 
