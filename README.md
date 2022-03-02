@@ -1,1 +1,1 @@
-brute force genotyper that checks for split and paired read signals of SVs at SV discovery sites and creates a VCF of the genotypes. input is a VCF file with SV locations and output is a new genotyped SV file. As of now the genotyper only works on duplications. 
+brute force genotyper that checks for split and paired read signals of SVs at SV discovery sites and creates a VCF of the genotypes. input is a VCF file with SV locations and output is a new genotyped SV file. Functional for DEL, DUP, INV currently 
