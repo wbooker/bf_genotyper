@@ -94,6 +94,11 @@ def get_split_event_type(primary, supplemental):
         orientations.append(first[4] > second[3])
     event_type = event_type_by_strand_and_order[tuple(orientations)]
 
+    # check if inversion has one read overlapping the other, meaning it's some complex inversion like inv + dup
+    if event_type == "INV":
+        if first[4] > second[3]:
+            event_type = "ComplexInv"
+
     if first[0] != second[0]:
         if event_type == "INV":
             event_type = "InterChrmInversion"
@@ -119,6 +124,13 @@ def get_breakpoints(primary, supplemental, split_type):
         first = supplemental
         second = primary
 
+    if primary[1] == True:
+        forward_strand = primary
+        reverse_strand = supplemental
+    else:
+        forward_strand = supplemental
+        reverse_strand = primary
+
     if split_type == "DUP":
         if first[2] < second[2]:
             left_bp = second[3]
@@ -130,8 +142,19 @@ def get_breakpoints(primary, supplemental, split_type):
     if split_type == "DEL":
         left_bp = first[4]
         right_bp = second[3]
+
+    if split_type == "INV":
+        #### If the forward strand is the second part of the split read, then the breakpoints should be at the beginning of each split (and vice versa)
+        if forward_strand[2] > 150 - reverse_strand[2]:
+            left_bp = first[3]
+            right_bp = second[3]
+        else:
+            left_bp = first[4]
+            right_bp = second[4]       
     
     if left_bp > right_bp:
+        print(first)
+        print(second)
         raise Exception('left_bp > right_bp')
 
     return left_bp, right_bp 
@@ -157,11 +180,13 @@ def calc_rough_insert_size(read_positions):
 
 
 def main():
-    vcf_in = pysam.VariantFile("inputs/test_del.vcf",'r')
-    vcf_out = pysam.VariantFile("outputs/test_del_gt.vcf",'w', header=vcf_in.header)
+    vcf_in = pysam.VariantFile("inputs/all_2callers_1ind_150dist_INVonly.vcf",'r')
+    vcf_out = pysam.VariantFile("outputs/all_2callers_1ind_150dist_INVonly_gt.vcf",'w', header=vcf_in.header)
     inside_threshold = 450 #### threshold for reads inside the signal breakpoints for that SV type
     outside_threshold = 450 #### threshold for reads outside the signal breakpoints for that SV type
     sam_iter_buffer = 600
+    #read_info = []
+    #read_info_all = []
     mean_sd_dic = {'FEMALE_1-F1_CGCATGAT-TCAGGCTT_S1': [345,179],
                    'FEMALE_2-F2_CTTAGGAC-GTAGGAGT_S12': [422,201],
                    'FEMALE_3-F3_ATCCGGTA-TATCGGTC_S16': [366,185],
@@ -204,7 +229,10 @@ def main():
         start_pos = var.start
         end_pos = var.stop
         chrom = var.chrom
-
+        print(start_pos)  
+        if end_pos - start_pos > 10000000: ## 10 megabases
+            continue
+        #print(start_pos)    
         #### breakpoint threshold dynamic on SV size
         if (end_pos - start_pos) < 300:
             inside_threshold = 150
@@ -228,6 +256,8 @@ def main():
                 chrom_len = bam_file.get_reference_length(chrom)
                 sample_insert_mean = mean_sd_dic[sample][0]
                 sample_insert_sd = mean_sd_dic[sample][1]
+                #if start_pos == 48883695:
+                #    print(sample)
 
                 ### Check to make sure we don't have duplicated reads if svlen < sam_iter_buffer*2, min/max to make sure we aren't starting past chromosome ends
                 if end_pos - start_pos <= 2*sam_iter_buffer:
@@ -282,6 +312,11 @@ def main():
                         if var.info["SVTYPE"] == split_type:
                             left_bp, right_bp = get_breakpoints(primary_read, supp_read, split_type)
                             if left_bp in range(start_pos-outside_threshold,start_pos+inside_threshold) and right_bp in range(end_pos-inside_threshold,end_pos+outside_threshold):
+                                #if sample == "JB_A2_46_S9":
+                                    #read_info.append(read.query_name+"\t"+read.query_name+"\t"+)
+                                    #print(read.query_name)
+                                    #print(primary_read)
+                                    #print(supp_read)
                                 split_support_counter += 1
 
                     #####                       #####
@@ -362,6 +397,49 @@ def main():
                                             #print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
                                     else:
                                         paired_lowMQ_name_list.append(read.query_name)
+                        
+                        if var.info["SVTYPE"] == "INV" and read.reference_id == read.next_reference_id:
+                            if read.is_reverse and read.reference_start in range(end_pos-outside_threshold,end_pos+inside_threshold) and read.mate_is_reverse:
+                                if read.next_reference_start < read.reference_start and read.next_reference_start in range(start_pos-outside_threshold,start_pos+inside_threshold):
+                                    #print(calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]))
+                                    if read.mapping_quality > 0:
+                                        paired_support_name_list.append(read.query_name)
+                                        #if sample == "JB_A2_25_S3":
+                                            #print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
+                                    else:
+                                        paired_lowMQ_name_list.append(read.query_name)
+
+                            if read.is_reverse and read.reference_start in range(start_pos-outside_threshold,start_pos+inside_threshold) and read.mate_is_reverse:
+                                if read.next_reference_start > read.reference_start and read.next_reference_start in range(end_pos-outside_threshold,end_pos+inside_threshold):
+                                    #print(calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]))
+                                    if read.mapping_quality > 0:
+                                        paired_support_name_list.append(read.query_name)
+                                        #if sample == "JB_A2_25_S3":
+                                            #print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
+                                    else:
+                                        paired_lowMQ_name_list.append(read.query_name)
+
+                            if not read.is_reverse and read.reference_end in range(start_pos-inside_threshold,start_pos+outside_threshold) and not read.mate_is_reverse:
+                                if read.next_reference_start > read.reference_start and paired_mate_end in range(end_pos-inside_threshold,end_pos+outside_threshold):
+                                    #print(calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]))
+                                    if read.mapping_quality > 0:
+                                        paired_support_name_list.append(read.query_name)
+
+                                        #if sample == "JB_A2_25_S3":
+                                            #print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
+                                    else:
+                                        paired_lowMQ_name_list.append(read.query_name)
+
+                            if not read.is_reverse and read.reference_end in range(end_pos-inside_threshold,end_pos+outside_threshold) and not read.mate_is_reverse:
+                                if read.next_reference_start < read.reference_start and read.reference_end in range(start_pos-inside_threshold,start_pos+outside_threshold):
+                                    #print(calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]))
+                                    if read.mapping_quality > 0:
+                                        paired_support_name_list.append(read.query_name)
+
+                                        #if sample == "JB_A2_25_S3":
+                                            #print(start_pos, end_pos, read.query_name, read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end, calc_rough_insert_size([read.reference_start, read.reference_end, read.next_reference_start, paired_mate_end]), (sample_insert_mean + (3 * sample_insert_sd)))
+                                    else:
+                                        paired_lowMQ_name_list.append(read.query_name)
 
                 paired_support_counter = len(paired_support_name_list)
 
@@ -374,6 +452,8 @@ def main():
         #### Write variant genotypes to output SV ####                 
         vcf_out.write(var)
     vcf_out.close()
+    #with open("F1_query_inv_splits.txt", "w") as file1:
+        #file1.writelines(read_info)
 
 if __name__ == "__main__":
     main()
